@@ -1,0 +1,163 @@
+name: dockerized-microservices-lab
+
+networks:
+  lab-network:
+    driver: bridge
+
+volumes:
+  postgres-data:
+  rabbitmq-data:
+
+secrets:
+  postgres_password:
+    file: ./secrets/postgres_password.txt
+  rabbitmq_password:
+    file: ./secrets/rabbitmq_password.txt
+
+services:
+
+  postgres:
+    image: postgres:16-alpine
+    container_name: lab-postgres
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-lab_user}
+      POSTGRES_DB: lab_bootstrap
+      POSTGRES_PASSWORD_FILE: /run/secrets/postgres_password
+    secrets:
+      - postgres_password
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+      - ./scripts/postgres-init:/docker-entrypoint-initdb.d:ro
+    ports:
+      - "${POSTGRES_PORT:-15495}:5432"
+    networks:
+      - lab-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-lab_user} -d lab_bootstrap"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+
+  redis:
+    image: redis:7-alpine
+    container_name: lab-redis
+    ports:
+      - "${REDIS_PORT:-16395}:6379"
+    networks:
+      - lab-network
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+  rabbitmq:
+    image: rabbitmq:3.13-management-alpine
+    container_name: lab-rabbitmq
+    environment:
+      RABBITMQ_DEFAULT_USER: ${RABBITMQ_USER:-lab_user}
+      RABBITMQ_DEFAULT_PASS_FILE: /run/secrets/rabbitmq_password
+    secrets:
+      - rabbitmq_password
+    volumes:
+      - rabbitmq-data:/var/lib/rabbitmq
+    ports:
+      - "${RABBITMQ_AMQP_PORT:-15695}:5672"
+      - "${RABBITMQ_MANAGEMENT_PORT:-15696}:15672"
+    networks:
+      - lab-network
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+  order-service:
+    build:
+      context: ./order-service
+      dockerfile: Dockerfile
+    container_name: lab-order-service
+    environment:
+      DB_HOST: postgres
+      DB_PORT: "5432"
+      DB_NAME: orders_db
+      DB_USER: orders_user
+      DB_PASSWORD_FILE: /run/secrets/postgres_password
+      REDIS_HOST: redis
+      REDIS_PORT: "6379"
+      RABBITMQ_HOST: rabbitmq
+      RABBITMQ_PORT: "5672"
+      RABBITMQ_USER: ${RABBITMQ_USER:-lab_user}
+      RABBITMQ_PASSWORD_FILE: /run/secrets/rabbitmq_password
+      SERVER_PORT: "8081"
+    secrets:
+      - postgres_password
+      - rabbitmq_password
+    ports:
+      - "${ORDER_SERVICE_PORT:-18100}:8081"
+    networks:
+      - lab-network
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+
+  inventory-service:
+    build:
+      context: ./inventory-service
+      dockerfile: Dockerfile
+    container_name: lab-inventory-service
+    environment:
+      DB_HOST: postgres
+      DB_PORT: "5432"
+      DB_NAME: inventory_db
+      DB_USER: inventory_user
+      DB_PASSWORD_FILE: /run/secrets/postgres_password
+      RABBITMQ_HOST: rabbitmq
+      RABBITMQ_PORT: "5672"
+      RABBITMQ_USER: ${RABBITMQ_USER:-lab_user}
+      RABBITMQ_PASSWORD_FILE: /run/secrets/rabbitmq_password
+      SERVER_PORT: "8082"
+    secrets:
+      - postgres_password
+      - rabbitmq_password
+    ports:
+      - "${INVENTORY_SERVICE_PORT:-18101}:8082"
+    networks:
+      - lab-network
+    depends_on:
+      postgres:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+
+  notification-service:
+    build:
+      context: ./notification-service
+      dockerfile: Dockerfile
+    container_name: lab-notification-service
+    environment:
+      REDIS_HOST: redis
+      REDIS_PORT: "6379"
+      RABBITMQ_HOST: rabbitmq
+      RABBITMQ_PORT: "5672"
+      RABBITMQ_USER: ${RABBITMQ_USER:-lab_user}
+      RABBITMQ_PASSWORD_FILE: /run/secrets/rabbitmq_password
+      SERVER_PORT: "8083"
+    secrets:
+      - rabbitmq_password
+    ports:
+      - "${NOTIFICATION_SERVICE_PORT:-18102}:8083"
+    networks:
+      - lab-network
+    depends_on:
+      redis:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
