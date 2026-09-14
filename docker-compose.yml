@@ -58,7 +58,11 @@ services:
     container_name: lab-rabbitmq
     environment:
       RABBITMQ_DEFAULT_USER: ${RABBITMQ_USER:-lab_user}
-      RABBITMQ_DEFAULT_PASS_FILE: /run/secrets/rabbitmq_password
+      # The image's own _FILE convention for this variable is deprecated (hard
+      # error on recent builds), so the value is resolved from the secrets
+      # file into this plain var by start.sh before `compose up` runs —
+      # never hardcoded and never committed.
+      RABBITMQ_DEFAULT_PASS: ${RABBITMQ_PASSWORD:?Set RABBITMQ_PASSWORD, e.g. via scripts/start.sh}
     secrets:
       - rabbitmq_password
     volumes:

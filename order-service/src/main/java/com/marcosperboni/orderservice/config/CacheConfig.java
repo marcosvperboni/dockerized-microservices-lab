@@ -1,5 +1,7 @@
 package com.marcosperboni.orderservice.config;
 
+import com.fasterxml.jackson.databind.SerializationFeature;
+import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
 import org.springframework.boot.cache.autoconfigure.RedisCacheManagerBuilderCustomizer;
 import org.springframework.cache.annotation.EnableCaching;
 import org.springframework.context.annotation.Bean;
@@ -18,10 +20,16 @@ public class CacheConfig {
 
 	@Bean
 	public RedisCacheManagerBuilderCustomizer redisCacheManagerBuilderCustomizer() {
+		// GenericJackson2JsonRedisSerializer builds its own internal (classic Jackson 2)
+		// ObjectMapper, separate from Boot 4's Jackson 3 bean, so java.time types need
+		// their module registered explicitly here or serialization of Instant fails.
+		GenericJackson2JsonRedisSerializer serializer = new GenericJackson2JsonRedisSerializer()
+				.configure(mapper -> mapper.registerModule(new JavaTimeModule())
+						.disable(SerializationFeature.WRITE_DATES_AS_TIMESTAMPS));
+
 		RedisCacheConfiguration ordersCacheConfig = RedisCacheConfiguration.defaultCacheConfig()
 				.entryTtl(Duration.ofMinutes(5))
-				.serializeValuesWith(RedisSerializationContext.SerializationPair
-						.fromSerializer(new GenericJackson2JsonRedisSerializer()));
+				.serializeValuesWith(RedisSerializationContext.SerializationPair.fromSerializer(serializer));
 
 		return builder -> builder.withCacheConfiguration(ORDERS_CACHE, ordersCacheConfig);
 	}
